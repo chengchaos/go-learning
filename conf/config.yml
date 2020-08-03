@@ -1,0 +1,10 @@
+
+database:
+  mysql:
+    host: localhost
+    port: :3306
+    username: chengchao
+    password: over2012
+    schema: chengchao
+
+admin: root
