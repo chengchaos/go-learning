@@ -3,12 +3,27 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"golang.org/x/text/encoding/simplifiedchinese"
 	"log"
 	"os"
 	"os/exec"
+	"runtime"
+	"strings"
 )
 
+
 func main() {
+
+
+	if strings.ToLower(runtime.GOOS) == "windows" {
+		t1, _ := simplifiedchinese.GBK.NewEncoder().String("我靠")
+		fmt.Println(t1)
+		log.Printf("%s\n", t1)
+	}
+}
+
+
+func nothing() {
 	log.Println("log")
 	cmd0 := exec.Command("C:\\works\\local\\bin\\curl.exe", " http://www.chaos.luxe")
 

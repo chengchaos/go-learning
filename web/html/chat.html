@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <script src="https://cdn.bootcdn.net/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+</head>
+
+<body>
+
+<input type="button" id="connect" value="connect" />
+<input type="button" id="send" value="send" />
+<input type="button" id="close" value="close" />
+
+<script>
+
+
+
+    $(document).ready(function () {
+
+        var socket;
+
+        $('#connect').on("click", function (event) {
+            socket = new WebSocket("ws://localhost:8080");
+
+            socket.onopen = function() {
+                console.log("Socket has been opened ...")
+            }
+            socket.onmessage = function(msg) {
+                console.log("receive =>", msg);
+            }
+
+            socket.onclose = function () {
+                console.log("Socket as been closed ... ")
+            }
+
+        });
+
+        $("#send").click(function (event) {
+            socket.send("This is send from client !")
+        }) ;
+
+
+    }) ;
+</script>
+</body>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</html>
