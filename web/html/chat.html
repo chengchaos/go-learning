@@ -7,9 +7,17 @@
 
 <body>
 
-<input type="button" id="connect" value="connect" />
-<input type="button" id="send" value="send" />
-<input type="button" id="close" value="close" />
+<p>
+    <input type="button" id="connect" value="connect" />
+    <input type="button" id="close" value="close" />
+</p>
+
+<p>
+    <textarea id="mytext" rows="20" cols="80" >This is send from client !</textarea>
+    <br />
+    <input type="button" id="send" value="send" />
+</p>
+
 
 <script>
 
@@ -36,7 +44,9 @@
         });
 
         $("#send").click(function (event) {
-            socket.send("This is send from client !")
+            let text = $("#mytext").val();
+            console.log(text)
+            socket.send(text)
         }) ;
 
 
