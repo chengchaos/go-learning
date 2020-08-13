@@ -71,13 +71,7 @@ func handleConnection(conn net.Conn) {
 		base64.StdEncoding.Encode(accept, h.Sum(nil))
 		log.Println(string(accept))
 
-		responseTemp := `
-HTTP/1.1 101 Switching Protocols
-Sec-WebSocket-Accept: %s
-Connection: Upgrade
-Upgrade: websocket
-
-`
+		responseTemp := "HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: %s\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
 		response := fmt.Sprintf(responseTemp, string(accept))
 		log.Println("response =>", response)
 
@@ -94,13 +88,13 @@ Upgrade: websocket
 			if err != nil {
 				log.Println("ReadIframe error =>", err)
 			}
-			log.Println(helper.ChineseGBK("接收 data =>", string(data)))
+			log.Println(helper.GBK("接收 data =>"), helper.GBK(string(data)))
 
 			err = wssocket.SendIframe([]byte("good"))
 			if err != nil {
 				log.Println("Sendiframe error =>", err)
 			}
-			log.Println(helper.ChineseGBK("回复 data OK!"))
+			log.Println(helper.GBK("回复 data OK!"))
 		}
 	} else {
 		log.Println(string(content))
@@ -138,7 +132,7 @@ func (ws *WsSocket) SendIframe(data []byte) error {
 	ws.Conn.Write([]byte{0x81})
 
 	var payLenByte byte
-	if ws.MaskingKey != nil && len(ws.MaskingKey) != 4 {
+	if ws.MaskingKey != nil && len(ws.MaskingKey) == 4 {
 		payLenByte = byte(0x80) | byte(dataLength)
 		ws.Conn.Write([]byte{payLenByte})
 		ws.Conn.Write(ws.MaskingKey)
@@ -176,40 +170,95 @@ func (ws *WsSocket) ReadIframe() (data []byte, err error) {
 	// 第一个字节 ：
 	// FIN + RSV1-3 + OPCODE
 	opcodeByte := make([]byte, 1)
-	_, err = ws.Conn.Read(opcodeByte)
-
+	n, err := ws.Conn.Read(opcodeByte)
 	if err != nil {
 		return
 	}
 
-	fin := opcodeByte[0] >> 7
+	log.Println("read opcode byte len =>", n)
+
+	// FIN  1 bit
+	// 如果是1，表示这是消息（message）的最后一个分片（fragment），
+	// 如果是0，表示不是是消息（message）的最后一个分片（fragment）。
+	fin := opcodeByte[0] >> 7 & 1
 	rsv1 := opcodeByte[0] >> 6 & 1
 	rsv2 := opcodeByte[0] >> 5 & 1
 	rsv3 := opcodeByte[0] >> 4 & 1
+
+	/*
+	Opcode: 4个比特。
+
+	操作代码，Opcode的值决定了应该如何解析后续的数据载荷（data payload）。
+	如果操作代码是不认识的，那么接收端应该断开连接（fail the connection）。可选的操作代码如下：
+
+	%x0：表示一个延续帧。当Opcode为0时，表示本次数据传输采用了数据分片，当前收到的数据帧为其中一个数据分片。
+	%x1：表示这是一个文本帧（frame）
+	%x2：表示这是一个二进制帧（frame）
+	%x3-7：保留的操作代码，用于后续定义的非控制帧。
+	%x8：表示连接断开。
+	%x8：表示这是一个ping操作。
+	%xA：表示这是一个pong操作。
+	%xB-F：保留的操作代码，用于后续定义的控制帧
+	 */
 	opcode := opcodeByte[0] & 15
 
 	log.Printf("fin => %v, rsv => %v, %v, %v, opcode => %v\n", fin, rsv1, rsv2, rsv3, opcode)
 
 	payloadLenByte := make([]byte, 1)
-	_, err = ws.Conn.Read(payloadLenByte)
+	n, err = ws.Conn.Read(payloadLenByte)
 	if err != nil {
 		return
 	}
-	payloadLen := int(payloadLenByte[0] & 0x7F)
+
+
+	/*
+	Mask: 1个比特。
+
+	表示是否要对数据载荷进行掩码操作。从客户端向服务端发送数据时，
+	需要对数据进行掩码操作；从服务端向客户端发送数据时，不需要对数据进行掩码操作。
+
+	如果服务端接收到的数据没有进行过掩码操作，服务端需要断开连接。
+
+	如果Mask是1，那么在Masking-key中会定义一个掩码键（masking key），
+	并用这个掩码键来对数据载荷进行反掩码。所有客户端发送到服务端的数据帧，Mask都是1。
+	 */
 	mask := payloadLenByte[0] >> 7
 
-	log.Printf("payloadLen => %d, mask => %v\n", payloadLen, mask)
+	log.Println("read payloadLenByte length =>", n)
 
+	var payloadLen int
+	payloadLen = int(payloadLenByte[0] & 0x7F)
+
+
+
+	if payloadLen == 126 {
+		extendedByte := make([]byte, 2)
+		_, err = ws.Conn.Read(extendedByte)
+		if err != nil {
+			return
+		}
+		payloadLen, _ = helper.BytesToIntU(extendedByte)
+	}
 	if payloadLen == 127 {
 		extendedByte := make([]byte, 8)
 		_, err = ws.Conn.Read(extendedByte)
 		if err != nil {
 			return
 		}
+		payloadLent64, err := helper.BytesToInt64U(extendedByte)
+		if err != nil {
+			return data, err
+		}
+		err = fmt.Errorf("We don't process length equals 127. payload len = %d\n", payloadLent64)
+		return data, err
 	}
 
-	maskingByte := make([]byte, 4)
+
+	log.Printf("payloadLen => %d, mask => %v\n", payloadLen, mask)
+
+	var maskingByte []byte
 	if mask == 1 {
+		maskingByte = make([]byte, 4)
 		_, err = ws.Conn.Read(maskingByte)
 		if err != nil {
 			return
@@ -222,22 +271,38 @@ func (ws *WsSocket) ReadIframe() (data []byte, err error) {
 	if err != nil {
 		return
 	}
-	log.Println("data =>", payloadDataByte)
 
-	dataByte := make([]byte, payloadLen)
-	for i := 0; i < payloadLen; i++ {
-		if mask == 1 {
+
+	//dataByte := make([]byte, payloadLen)
+	//for i := 0; i < payloadLen; i++ {
+	//	if mask == 1 {
+	//		dataByte[i] = payloadDataByte[i] ^ maskingByte[i % 4]
+	//	} else {
+	//		dataByte[i] = payloadDataByte[i]
+	//	}
+	//}
+
+	var dataByte []byte
+
+	if mask == 1 {
+		dataByte := make([]byte, payloadLen)
+		for i := 0; i < payloadLen; i++ {
 			dataByte[i] = payloadDataByte[i] ^ maskingByte[i % 4]
-		} else {
-			dataByte[i] = payloadDataByte[i]
+			log.Printf("%v => %v\n", payloadDataByte[i], dataByte[i])
 		}
+	} else {
+		dataByte = payloadDataByte
 	}
+
+	log.Println("dataByte =>", dataByte)
 
 	log.Printf("fin == 1 => %v\n", fin == 1)
 
 	if fin == 1 {
 		data = dataByte
-		return
+		dataLen := len(data)
+		log.Printf("fin == 1; dataLen =>%d\n", dataLen)
+		return data[0:dataLen], err
 	}
 
 	nextData, err := ws.ReadIframe()
@@ -246,7 +311,8 @@ func (ws *WsSocket) ReadIframe() (data []byte, err error) {
 	}
 
 	data = append(data, nextData...)
-	return
+	dataLen := len(data)
+	return data[0:dataLen], err
 }
 
 func parseHandshake(content string) map[string]string {
